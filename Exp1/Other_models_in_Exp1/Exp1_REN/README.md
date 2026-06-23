@@ -1,86 +1,150 @@
-# Exp1 REN Baseline
+# Exp1 REN Baseline Reproducibility Guide
 
-These scripts reproduce the REN baseline used in Exp1. They require the separate Julia toolbox `RobustNeuralNetworks.jl`, so they are not expected to run from this repository by themselves.
+These scripts reproduce the REN baseline for Section VI.A / Fig. 4 using the
+Julia toolbox [`RobustNeuralNetworks.jl`](https://github.com/acfr/RobustNeuralNetworks.jl/tree/main).
 
-For simplicity, the final REN evaluation result files have already been copied into this repository's `Exp1/Results/` folder. You only need to run the Julia workflow below if you want to regenerate the REN model and evaluation outputs.
+The toolbox code is not stored in this repository. The commands below clone the
+toolbox into this folder, install its Julia example environment, copy the Exp1
+REN scripts into the toolbox, then train and evaluate the clean-data and noisy
+SNR10 REN baselines.
 
-## 1. Install The Julia Toolbox
+Generated REN model and evaluation files are saved to:
 
-Download or clone `RobustNeuralNetworks.jl` to a separate directory on your computer.
+```text
+Exp1/Results/
+```
+
+The repository already contains the final REN `.mat` result files. Run the full
+Julia workflow only if you want to regenerate the REN `.bson` model files and
+evaluation `.mat` files.
+
+## Tested Environment
+
+The workflow below was tested with:
+
+```text
+macOS 26.5.1
+Julia 1.12.6
+RobustNeuralNetworks.jl commit 1d0b5ab8c326719c67e2adb85d4db01e742883d9
+```
+
+Other Julia versions may work, but the versions above are the known tested
+setup.
+
+## Full Reproduction Commands
+
+Replace `/path/to/Passive_lifted_FIR_filters_for_nonlinear_system_identification`
+with the absolute path to this repository on your computer.
+
+
+Then run:
 
 ```bash
-git clone https://github.com/acfr/RobustNeuralNetworks.jl.git
+set -e
+
+cd /path/to/Passive_lifted_FIR_filters_for_nonlinear_system_identification/Exp1/Other_models_in_Exp1/Exp1_REN
+
+if test ! -d RobustNeuralNetworks.jl; then
+  git clone https://github.com/acfr/RobustNeuralNetworks.jl.git
+else
+  echo "Using existing RobustNeuralNetworks.jl folder."
+fi
+
 cd RobustNeuralNetworks.jl
-```
-
-From the toolbox root, install the example environment:
-
-```bash
 julia --project=examples -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
-```
+julia --project=examples -e 'using Pkg; Pkg.add("MAT"); Pkg.instantiate()'
+cd ..
 
-The first run can take several minutes because Julia downloads and precompiles the example dependencies.
+cp REN_load_data.jl \
+   REN_train_exp1.jl \
+   REN_train_exp1_noise.jl \
+   REN_eval_exp1.jl \
+   RobustNeuralNetworks.jl/examples/src/
 
-## 2. Copy The Exp1 REN Scripts
+export NFIR_EXP1_DIR="$(cd ../.. && pwd)"
 
-Copy these four files from this repository:
+cd RobustNeuralNetworks.jl
 
-```text
-Exp1/Other_models_in_Exp1/Exp1_REN/REN_load_data.jl
-Exp1/Other_models_in_Exp1/Exp1_REN/REN_train_exp1.jl
-Exp1/Other_models_in_Exp1/Exp1_REN/REN_train_exp1_noise.jl
-Exp1/Other_models_in_Exp1/Exp1_REN/REN_eval_exp1.jl
-```
-
-Paste them into the toolbox folder:
-
-```text
-RobustNeuralNetworks.jl/examples/src/
-```
-
-## 3. Point The Scripts To This Repository
-
-Set `NFIR_EXP1_DIR` to the `Exp1` folder in this open-source repository:
-
-```bash
-export NFIR_EXP1_DIR="/path/to/c_final_opensource/Exp1"
-```
-
-The scripts use:
-
-```text
-$NFIR_EXP1_DIR/Training_data
-$NFIR_EXP1_DIR/Results
-```
-
-## 4. Run The REN Baseline
-
-Run all commands from the `RobustNeuralNetworks.jl` toolbox root.
-
-Clean-data REN:
-
-```bash
 julia --project=examples examples/src/REN_train_exp1.jl
 julia --project=examples examples/src/REN_eval_exp1.jl
-```
 
-SNR10 REN:
-
-```bash
 julia --project=examples examples/src/REN_train_exp1_noise.jl
 julia --project=examples examples/src/REN_eval_exp1.jl --snr10
 ```
 
-The training scripts save:
+Command notes:
+
+- `set -e` stops the script as soon as any command fails.
+- The `git clone` block downloads `RobustNeuralNetworks.jl` only if the folder
+  does not already exist.
+- `Pkg.develop(path=".")` makes the Julia example environment use the local
+  toolbox checkout.
+- `Pkg.add("MAT")` is needed because `REN_load_data.jl` uses `using MAT`.
+- `NFIR_EXP1_DIR` points the Julia scripts back to this repository's `Exp1`
+  folder, so outputs go to `Exp1/Results/`.
+
+The first Julia installation command can take several minutes because Julia
+downloads and precompiles the toolbox dependencies.
+
+## Script Roles
+
+- [REN_train_exp1.jl](REN_train_exp1.jl): trains the clean-data REN model used
+  for the left panel of Fig. 4.
+- [REN_train_exp1_noise.jl](REN_train_exp1_noise.jl): trains the noisy-data
+  SNR10 REN model used for the right panel of Fig. 4.
+- [REN_load_data.jl](REN_load_data.jl): loads and prepares the Exp1 training
+  data for the training scripts.
+- [REN_eval_exp1.jl](REN_eval_exp1.jl): loads a trained `.bson` model and writes
+  inference/evaluation outputs to `.mat`.
+
+## Expected Outputs
+
+Clean-data training:
+
+```bash
+julia --project=examples examples/src/REN_train_exp1.jl
+```
+
+saves:
 
 ```text
 Exp1/Results/run_Exp1_REN_model.bson
-Exp1/Results/run_Exp1_REN_SNR10_model.bson
 ```
 
-The evaluation script saves:
+Clean-data evaluation:
+
+```bash
+julia --project=examples examples/src/REN_eval_exp1.jl
+```
+
+saves:
 
 ```text
 Exp1/Results/run_Exp1_REN_train.mat
+Exp1/Results/run_Exp1_REN_training_cost_vs_epoch.svg
+```
+
+Noisy SNR10 training:
+
+```bash
+julia --project=examples examples/src/REN_train_exp1_noise.jl
+```
+
+saves:
+
+```text
+Exp1/Results/run_Exp1_REN_SNR10_model.bson
+```
+
+Noisy SNR10 evaluation:
+
+```bash
+julia --project=examples examples/src/REN_eval_exp1.jl --snr10
+```
+
+saves:
+
+```text
 Exp1/Results/run_Exp1_REN_SNR10_train.mat
+Exp1/Results/run_Exp1_REN_SNR10_training_cost_vs_epoch.svg
 ```

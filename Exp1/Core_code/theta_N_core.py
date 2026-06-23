@@ -669,6 +669,22 @@ def _resolve_runtime_device(cfg_device: str) -> torch.device:
     raise ValueError("device must be one of: cpu, mps, cuda")
 
 
+def _sync_device_for_timing(device: torch.device) -> None:
+    """
+    Synchronize async GPU work before reading wall-clock timers.
+
+    Input:
+    - device: torch.device scalar, runtime backend for tensors/model.
+
+    Output:
+    - none. CPU has no async device queue to synchronize here.
+    """
+    if device.type == "mps":
+        torch.mps.synchronize()
+    elif device.type == "cuda":
+        torch.cuda.synchronize(device)
+
+
 def _device_report(device: torch.device) -> dict[str, Any]:
     """
     Build a best-effort runtime device report for startup logging.
@@ -1650,9 +1666,6 @@ def train_step1(u_tb: np.ndarray, y_tb: np.ndarray, p_7tb: np.ndarray,
 
     nn_open_loop_train_time_sec = 0.0  # scalar seconds
     nn_bptt_train_time_sec = 0.0       # scalar seconds
-    device_name = str(cfg["device"]).strip().lower()
-    if device_name != "mps":
-        raise ValueError("timing not supported for not mps mode")
     
     if not skip_open_loop_training:
         # Use verbose option to decide whether to print out
@@ -1671,7 +1684,7 @@ def train_step1(u_tb: np.ndarray, y_tb: np.ndarray, p_7tb: np.ndarray,
                 f"[min-Step1] fir_source={fir_source_type_text} | epochs={cfg['max_epochs']}"
             )
         
-        torch.mps.synchronize() # sync gpu and cpu
+        _sync_device_for_timing(device)
         timer1 = time.time()
         # Training loop: loop over epochs
         for epoch in range(1, int(cfg["max_epochs"]) + 1):
@@ -1776,7 +1789,7 @@ def train_step1(u_tb: np.ndarray, y_tb: np.ndarray, p_7tb: np.ndarray,
                         )
                     break # exit epoch training loop
         
-        torch.mps.synchronize() # sync gpu and cpu
+        _sync_device_for_timing(device)
         nn_open_loop_train_time_sec = time.time() - timer1
         print('In step1 open loop training. Time to train = ', nn_open_loop_train_time_sec)
     else:
@@ -1788,7 +1801,7 @@ def train_step1(u_tb: np.ndarray, y_tb: np.ndarray, p_7tb: np.ndarray,
     model.load_state_dict(best_state)
     """ BPTT block starts here 
     """
-    torch.mps.synchronize() # sync gpu and cpu
+    _sync_device_for_timing(device)
     timer2 = time.time()
 
     bptt_history_epoch = []
@@ -2124,7 +2137,7 @@ def train_step1(u_tb: np.ndarray, y_tb: np.ndarray, p_7tb: np.ndarray,
 
     """ BPTT block ends here 
     """
-    torch.mps.synchronize() # sync gpu and cpu
+    _sync_device_for_timing(device)
     nn_bptt_train_time_sec = time.time() - timer2
     print('In step1 BPTT loop training. Time to BPT = ', nn_bptt_train_time_sec)
 
