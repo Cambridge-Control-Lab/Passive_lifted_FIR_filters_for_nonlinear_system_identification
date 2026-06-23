@@ -32,6 +32,9 @@ case, the model prediction is compared with the clean ground-truth output.
 
 ## Reproduce The FB-BP Noisy Case
 
+Before running this experiment, create and activate the conda environment
+following the setup instructions in the repository-level [README.md](../README.md).
+
 Run the FB-BP noisy training case from the repository root:
 
 ```bash
@@ -48,6 +51,51 @@ and writes outputs to:
 
 ```text
 Exp1/Results/
+```
+
+By default, the training code uses `mps`. MPS is PyTorch's Apple Metal
+backend for Apple Silicon GPUs, such as M1, M2, M3, and newer Apple Silicon
+Macs. The provided FB-BP result files in this folder were generated with
+`mps`.
+
+The supported device settings are:
+
+- `mps`: Apple Silicon GPU through PyTorch MPS. This is the default and the
+  tested setting for the provided results.
+- `cpu`: CPU-only execution. This should work on any machine, but is slower.
+- `cuda`: NVIDIA GPU through CUDA-enabled PyTorch. This should work on a
+  suitable CUDA machine, but has not been tested for this release.
+
+To change the device, edit:
+
+```text
+Exp1/Core_code/theta_N_core.py
+```
+
+Inside `build_default_config()`, find the device settings:
+
+```python
+# cfg["device"] = "cpu"
+cfg["device"] = "mps"
+```
+
+For CPU, change them to:
+
+```python
+cfg["device"] = "cpu"
+# cfg["device"] = "mps"
+```
+
+Then run the same command:
+
+```bash
+python Exp1/train_FB_BP_noisy_Fig4.py
+```
+
+For CUDA, set the same device field to:
+
+```python
+cfg["device"] = "cuda"
 ```
 
 ## Plot The Provided FB-BP Noisy Result
