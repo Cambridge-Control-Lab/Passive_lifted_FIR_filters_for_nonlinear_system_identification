@@ -123,11 +123,14 @@ trained with noisy output data.
 ## Configuration Variants
 
 The default configuration in `train_FB_BP_noisy_Fig4.py` corresponds to the
-FB-BP noisy case:
+FB-BP noisy case in Fig. 4 of the paper. Here `FB-BP` means that the last
+iteration of the alternating algorithm, Algorithm 1 in the paper, has BPTT
+fine-tuning turned on:
 
 ```python
 "active_dims": "0,1"
 "is_passive": "1"
+"last_bptt_on": "1"
 ```
 
 To run the FF/feedforward case, change:
@@ -141,6 +144,15 @@ To run a non-passive `-np` case, change:
 ```python
 "is_passive": "0"
 ```
+
+To run the same FB configuration without BPTT in the last iteration, change:
+
+```python
+"last_bptt_on": "0"
+```
+
+This keeps the alternating Step 2 / Step 1 training loop, but skips the final
+closed-loop BPTT fine-tuning stage.
 
 
 ## Baseline Models
