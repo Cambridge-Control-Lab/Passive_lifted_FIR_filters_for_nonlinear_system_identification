@@ -1,10 +1,9 @@
 # Experiment 1: Section VI.A
 
 This folder contains the code, data, and selected saved results for the
-Section VI.A simulated-data experiment: identification of the nonlinear
-mass-spring-damper system.
+Section VI.A of the paper.
 
-Fig. 4 in the paper reports the Fit metric on unseen test trajectories for
+Fig. 4 in the paper reports the Fit metric (Equation 21 of the paper) on unseen test trajectories for
 different model classes. The files provided here are intended to reproduce
 and inspect the FB-BP noisy case in the right panel of Fig. 4, and to provide
 the baseline model code and saved result files used for comparison.
@@ -28,7 +27,7 @@ case, the model prediction is compared with the clean ground-truth output.
   toolbox.
 - `train_FB_BP_noisy_Fig4.py`: Python driver for reproducing the FB-BP noisy
   case.
-- `script_FB_BP_noisy_results_analysis.m`: simple MATLAB script that plots the
+- `script_FB_BP_noisy_results_analysis.py`: simple Python script that plots the
   FB-BP box in the right panel of Fig. 4 from the provided result files.
 
 ## Reproduce The FB-BP Noisy Case
@@ -39,7 +38,7 @@ Run the FB-BP noisy training case from the repository root:
 python Exp1/train_FB_BP_noisy_Fig4.py
 ```
 
-The driver calls:
+The script train_FB_BP_noisy_Fig4.py calls:
 
 ```text
 Exp1.Core_code.Exp1_NFIR_training_code
@@ -53,19 +52,19 @@ Exp1/Results/
 
 ## Plot The Provided FB-BP Noisy Result
 
-The provided MATLAB script plots only the FB-BP noisy box used in the right
+The provided Python script plots only the FB-BP noisy box used in the right
 panel of Fig. 4.
 
 From the repository root:
 
-```matlab
-run('Exp1/script_FB_BP_noisy_results_analysis.m')
+```bash
+python Exp1/script_FB_BP_noisy_results_analysis.py
 ```
 
 Or from inside the `Exp1` folder:
 
-```matlab
-run('script_FB_BP_noisy_results_analysis.m')
+```bash
+python script_FB_BP_noisy_results_analysis.py
 ```
 
 The script loads both the noise-free and noisy FB-BP result files. The clean
@@ -112,10 +111,3 @@ Exp1/Results/
 
 The REN scripts require the external `RobustNeuralNetworks.jl` toolbox. See
 `Other_models_in_Exp1/Exp1_REN/README.md` for the REN-specific workflow.
-
-## Notes On Dependencies
-
-This repository does not currently provide a pinned Python environment file.
-The Python code uses packages including NumPy, SciPy, PyTorch, CVXPY, and
-MOSEK. MATLAB is used for the result-analysis script and for the N4SID
-baseline script.
