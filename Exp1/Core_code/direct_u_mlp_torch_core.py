@@ -2,7 +2,14 @@
 direct_u_mlp_torch_core.py
 
 Hand-coded PyTorch direct u -> y MLP baseline.
-This is a standard MLP with no NFIR structure.
+This is a standard MLP with no passive lifted FIR/NFIR structure from
+arXiv:2508.05279v2. It is kept as an Exp1 comparison model.
+
+Flow map:
+1. ``direct_u_mlp_data`` builds delayed input features X_2d, shape (N,D), and
+   normalized targets y_n1, shape (N,1).
+2. ``DirectTorchMLP`` maps X_2d directly to y_n1 with a feedforward MLP.
+3. The training loop minimizes ordinary MSE and saves baseline predictions.
 """
 
 from __future__ import annotations
@@ -32,6 +39,16 @@ class DirectTorchMLP(nn.Module):
     """
 
     def __init__(self, input_dim: int, hidden_dims: tuple[int, int]) -> None:
+        """
+        Initialize the direct baseline MLP.
+
+        Inputs:
+        - input_dim: scalar int D, number of delayed input features.
+        - hidden_dims: tuple[int,int], widths of the two hidden layers.
+
+        This constructor belongs to the baseline path only. It does not build
+        theta_N lifting functions or theta_G FIR filters.
+        """
         super().__init__()
         input_dim = int(input_dim)
         h1 = int(hidden_dims[0])

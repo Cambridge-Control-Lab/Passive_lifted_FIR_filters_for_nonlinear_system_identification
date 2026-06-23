@@ -1,3 +1,17 @@
+"""Data helpers for the Exp1 direct-u MLP baseline.
+
+Role in the workflow:
+- This baseline maps delayed input samples directly to output samples and does
+  not implement the passive lifted FIR/NFIR structure of arXiv:2508.05279v2.
+- It is kept as comparison code for Exp1, so comments here focus on data
+  layout, splitting, normalization, and saved-output compatibility.
+
+Notation:
+- T: number of time samples
+- B: number of trajectories
+- D: number of delayed input features, equal to u_delay_steps + 1
+- N: number of flattened samples, typically selected_batches * T
+"""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -43,7 +57,7 @@ def build_default_data_config() -> dict[str, Any]:
     # Normalize y only inside training. Saved predictions are in original y units.
     cfg["target_norm_mode"] = "zscore"  # "none" or "zscore"
 
-    # Batch split follows Step1 convention.
+    # Batch split follows the theta_N convention used by the NFIR training path.
     cfg["train_val_test_split"] = (15, 3, 2)
     cfg["split_seed"] = 42
     cfg["shuffle_split"] = False
@@ -228,6 +242,19 @@ def split_direct_mlp_data(u_tb: np.ndarray, y_tb: np.ndarray, cfg: dict[str, Any
         y_std = 1.0
 
     def flatten_batches(batch_idx: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """
+        Flatten selected trajectory batches for direct-MLP supervised learning.
+
+        Input:
+        - batch_idx: ndarray, shape (B_selected,), integer trajectory indices.
+
+        Outputs:
+        - X_2d: ndarray, shape (B_selected*T,D), normalized input-delay features.
+        - y_1d: ndarray, shape (B_selected*T,), target output samples.
+
+        This helper is baseline-only and does not implement the NFIR lifting
+        equations in arXiv:2508.05279v2.
+        """
         # X_2d: shape (len(batch_idx)*T,D); y_1d: shape (len(batch_idx)*T,).
         X_2d = x_all_btd[batch_idx].reshape(-1, d_count)
         y_1d = y_all_bt[batch_idx].reshape(-1)

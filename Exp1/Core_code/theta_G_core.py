@@ -1,3 +1,27 @@
+"""theta_G FIR/filter-parameter optimization core for Exp1.
+
+Position in the whole NFIR workflow:
+- This file implements the theta_G update in Algorithm 1 of
+  arXiv:2508.05279v2. In the paper, theta_G denotes the FIR/filter
+  parameters of the lifted passive FIR model.
+- Legacy variable names in this code may still contain ``step2``. Those names
+  refer to the theta_G update and are kept unchanged for saved-result
+  compatibility.
+
+File-level flow map:
+1. Build or load the lifting signal k_jtb, shape (J,T,B). Depending on
+   ``k_source_mode``, k_jtb comes from a random MLP, an imported theta_N model,
+   or a polynomial lifting basis.
+2. Call ``theta_G_cvx.solve_step2_cvx_min`` to solve the convex theta_G
+   subproblem. This corresponds to arXiv v2 Eq. (15), with the regularized
+   objective related to Eq. (14).
+3. Enforce passive FIR structure through frequency-domain constraints related
+   to arXiv v2 Eq. (16) and decay bounds related to Eq. (17).
+4. Run open-loop and closed-loop rollouts with the solved FIR bank, using the
+   NFIR branch structure of arXiv v2 Eq. (7)-Eq. (10).
+5. Save diagnostics and MATLAB/Python outputs that are consumed by the next
+   theta_N update in the alternating loop.
+"""
 from __future__ import annotations
 from pathlib import Path
 import pickle
@@ -110,7 +134,7 @@ def _to_branch_vector(value: Any, j_count: int, default_value: float) -> np.ndar
 def build_default_config_min(
         mode: str = "imported_nn") -> dict[str, Any]:
     """
-        Build default plain-dict config for Step2_min.
+        Build default plain-dict config for the theta_G optimization path.
 
         Input:
         - mode: "imported_nn" or "random_nn" or "poly_lifting"
@@ -201,11 +225,11 @@ def build_default_config_min(
     cfg["mlp_hidden_activation"] = "tanh"  # scalar string: hidden-layer activation for random/imported NN modes.
     cfg["mlp_output_activation"] = "tanh"  # scalar string: output activation for k_j(t) in random/imported NN modes.
     cfg["train_val_test_split"] = (16, 2, 2)
-    cfg["imported_split_source"] = "step1"  # "step1": use Step1 saved split; "cfg": use Step2 train_val_test_split.
+    cfg["imported_split_source"] = "step1"  # "step1": use theta_N saved split; "cfg": use theta_G train_val_test_split.
     cfg["split_seed"] = 42
     cfg["shuffle_split"] = False
 
-    # Imported mode resolves J/M from Step1 when set to None.
+    # Imported mode resolves J/M from theta_N when set to None.
     if mode_text == "imported_nn":
         cfg["n_branch"] = None
         cfg["m_fir"] = None
@@ -238,7 +262,7 @@ def build_default_config_min(
 
 def _validate_cfg(cfg: dict[str, Any]) -> None:
     """
-    Validate plain-dict Step2_min config.
+    Validate plain-dict theta_G config.
 
     Input:
     - cfg: dict[str, Any]
@@ -265,7 +289,7 @@ def _validate_cfg(cfg: dict[str, Any]) -> None:
     if mode_text == "imported_nn":
         if cfg.get("source_step1_pkl", None) is None:
             raise ValueError("imported_nn mode requires source_step1_pkl")
-        # In imported mode, if a MAT path is provided it must be strictly matched to Step1 data.
+        # In imported mode, if a MAT path is provided it must strictly match theta_N data.
         if cfg.get("source_data_mat", None) is not None and not bool(cfg.get("strict_source_match", False)):
             raise ValueError("imported_nn mode requires strict_source_match=True when source_data_mat is provided")
     if mode_text == "random_nn" or mode_text == "poly_lifting":
@@ -391,7 +415,7 @@ def recheck_cfg_min(cfg: dict[str, Any], verbose: bool = True) -> dict[str, Any]
     cfg_fixed = dict(cfg)
     mode_text = str(cfg_fixed.get("k_source_mode", "")).strip().lower()
 
-    # Keep imported mode dimensions unresolved so they are loaded from Step1.
+    # Keep imported mode dimensions unresolved so they are loaded from theta_N.
     if mode_text == "imported_nn":
         if cfg_fixed.get("n_branch", None) is not None:
             if bool(verbose):
@@ -516,15 +540,15 @@ def _load_pickle_dict(path: str | Path) -> dict[str, Any]:
 
 def _require_imported_step1_keys(step1: dict[str, Any]) -> None:
     """
-        Validate required keys in imported Step1 pickle.
+        Validate required keys in imported theta_N pickle.
 
         Input:
-        - step1: dictionary loaded from Step1 pickle
+        - step1: dictionary loaded from a theta_N pickle
 
         Output:
         - none (raises ValueError if missing key)
     """
-    # Required keys for imported Step2_min mode.
+    # Required keys for imported theta_N data used by theta_G.
     required = [
         "u_tb",
         "y_tb",
@@ -551,7 +575,7 @@ def _require_imported_step1_keys(step1: dict[str, Any]) -> None:
 
 def _extract_m_fir_from_step1(step1: dict[str, Any]) -> int:
     """
-        Resolve FIR length M from imported Step1 dictionary.
+        Resolve FIR length M from imported theta_N dictionary.
 
         Priority:
         1) step1['g_bank'].shape[1]
@@ -559,8 +583,8 @@ def _extract_m_fir_from_step1(step1: dict[str, Any]) -> int:
         3) cfg['m_fir']
 
         Input:
-        - step1: Step1 dictionary
-        - cfg: Step2_min config dictionary
+        - step1: legacy variable name for a theta_N dictionary
+        - cfg: theta_G config dictionary
 
         Output:
         - m_fir: int
@@ -574,15 +598,15 @@ def _extract_m_fir_from_step1(step1: dict[str, Any]) -> int:
 
 def _read_step1_dims(path: str | Path) -> tuple[int, int]:
     """
-        Read branch count and FIR length from Step1 pickle.
+        Read branch count and FIR length from theta_N pickle.
 
         Input:
-        - path: str | Path to Step1 pickle
+        - path: str | Path to theta_N pickle
 
         Output:
         - (j_count, m_fir): tuple[int, int]
     """
-    step1 = _load_pickle_dict(path) # step1 is now a dict
+    step1 = _load_pickle_dict(path) # step1 is a legacy variable name for a theta_N result dict
 
     # Require k_jtb for J.
     if "k_jtb" not in step1:
@@ -605,16 +629,16 @@ def _strict_check_mat_matches_step1(
     skip_p7_check: bool = False,
 ) -> None:
     """
-    Ensure source MAT arrays match arrays saved in Step1 pickle.
+    Ensure source MAT arrays match arrays saved in a theta_N pickle.
 
     Input:
-    - step1: Step1 dictionary
+    - step1: legacy variable name for a theta_N dictionary
     - loaded: dict from io_data.load_training_mat
 
     Output:
     - none (raises ValueError if mismatch)
     """
-    # Read Step1 arrays.
+    # Read theta_N arrays.
     u_step1 = np.asarray(step1["u_tb"], dtype=float)
     y_step1 = np.asarray(step1["y_tb"], dtype=float)
     p_step1 = np.asarray(step1["p_7tb"], dtype=float)
@@ -697,10 +721,10 @@ def _load_inputs_imported(cfg: dict[str, Any]) -> tuple[dict[str, Any], int, int
     # Read source path.
     step1_path = Path(str(cfg["source_step1_pkl"]))
 
-    # Load Step1 dictionary.
+    # Load theta_N dictionary.
     step1 = _load_pickle_dict(step1_path)
 
-    # Validate required Step1 keys.
+    # Validate required theta_N keys.
     _require_imported_step1_keys(step1)
 
     # Optional strict source MAT alignment check.
@@ -726,8 +750,8 @@ def _load_inputs_imported(cfg: dict[str, Any]) -> tuple[dict[str, Any], int, int
     inputs["k_jtb"] = np.asarray(step1["k_jtb"], dtype=float)
 
     # Imported split policy:
-    # - "step1": reuse Step1 saved indices.
-    # - "cfg": rebuild indices from Step2 train_val_test_split.
+    # - "step1": reuse theta_N saved indices.
+    # - "cfg": rebuild indices from theta_G train_val_test_split.
     imported_split_source_text = str(cfg.get("imported_split_source", "step1")).strip().lower()
     if imported_split_source_text == "cfg":
         n_batch_total = int(inputs["u_tb"].shape[1])  # scalar B, total number of trajectories
@@ -749,7 +773,7 @@ def _load_inputs_imported(cfg: dict[str, Any]) -> tuple[dict[str, Any], int, int
     inputs["feature_map"] = np.asarray(step1["feature_map"], dtype=int)
     inputs["feature_mean"] = np.asarray(step1["feature_mean"], dtype=float).reshape(-1)
     inputs["feature_std"] = np.asarray(step1["feature_std"], dtype=float).reshape(-1)
-    # Imported NN must use the same feature clipping as Step1 training.
+    # Imported NN must use the same feature clipping as theta_N training.
     # effective_x_max: None or scalar float, applied after feature normalization.
     step1_x_max = step1.get("cfg", {}).get("x_max", step1.get("x_max", None))
     step2_x_max = cfg.get("x_max", None)
@@ -876,7 +900,7 @@ def _load_inputs_random(cfg: dict[str, Any]) -> tuple[dict[str, Any], int, int]:
         scale_io_by_20=bool(cfg["scale_io_by_20"]),
     )
 
-    # Convert to model input format (B,T,F), float32 to match Step1/old Step2 path.
+    # Convert to model input format (B,T,F), float32 to match theta_N/legacy theta_G path.
     x_all_btf = np.transpose(p_ext_ftb, (2, 1, 0)).astype(np.float32)
 
     # Compute feature normalization stats from train split only.
@@ -961,6 +985,22 @@ def _build_poly_k_jtb_from_x_all(
     j_count: int,
     poly_basis_type: str = "monomial",
 ) -> np.ndarray:
+    """
+    Build polynomial lifting values for the theta_G update.
+
+    Inputs:
+    - x_all_btf: ndarray, shape (B,T,F), normalized feature tensor.
+    - poly_order: scalar int, maximum polynomial degree.
+    - j_count: scalar int, number of basis terms / branches J.
+    - poly_basis_type: scalar str, either "monomial" or "legendre".
+
+    Output:
+    - k_jtb: ndarray, shape (J,T,B), lifting values used by theta_G.
+
+    This is the deterministic polynomial alternative to the neural lifting
+    functions in arXiv:2508.05279v2 Eq. (8) and Eq. (20). The degree-0 term
+    gives k(t)=1, which reduces the lifted branch to a pure FIR contribution.
+    """
     b_count = int(x_all_btf.shape[0])
     t_count = int(x_all_btf.shape[1])
     f_count = int(x_all_btf.shape[2])
@@ -1121,7 +1161,7 @@ def _load_inputs_polylift(cfg: dict[str, Any]) -> tuple[dict[str, Any], int, int
         scale_io_by_20=bool(cfg["scale_io_by_20"]),
     )
 
-    # Convert to model input format (B,T,F), float32 to match Step1/old Step2 path.
+    # Convert to model input format (B,T,F), float32 to match theta_N/legacy theta_G path.
     x_all_btf = np.transpose(p_ext_ftb, (2, 1, 0)).astype(np.float32)
 
     # Compute feature normalization stats from train split only.
@@ -1370,7 +1410,7 @@ def _rebuild_k_jtb_all_mode(inputs:dict[str, Any], cfg_local:dict[str, Any], p_7
         scale_io_by_20=bool(cfg_local["scale_io_by_20"]),
     )
 
-    # Convert to model input format (B,T,F), float32 to match Step1/old Step2 path.
+    # Convert to model input format (B,T,F), float32 to match theta_N/legacy theta_G path.
     x_all_btf = np.transpose(p_ext_ftb, (2, 1, 0)).astype(np.float32)
     # Reuse the fixed feature normalization from the initial data load.
     # feature_mean_f, feature_std_f: shape (F,), where F is x_all_btf.shape[2].
@@ -1378,7 +1418,7 @@ def _rebuild_k_jtb_all_mode(inputs:dict[str, Any], cfg_local:dict[str, Any], p_7
     feature_std_f = np.asarray(inputs["feature_std"], dtype=float).reshape(-1)
 
     # Apply normalization to all batches. In imported_nn mode these stats come
-    # from Step1, so regenerated k_jtb stays in the same coordinate system.
+    # from theta_N, so regenerated k_jtb stays in the same coordinate system.
     x_all_btf = (
         x_all_btf
         - feature_mean_f.reshape(1, 1, -1).astype(np.float32)
@@ -1638,7 +1678,7 @@ def _simulate_collect_closed_loop(inputs: dict[str, Any], g_jm: np.ndarray, cfg_
         Input:
         - inputs: dict with u_tb, y_tb, feature metadata and model metadata
         - g_jm: np.ndarray, shape (J,M)
-        - cfg_local: step2 config dictionary
+        - cfg_local: theta_G config dictionary
 
         Output:
         - out: dict with the same core keys as _simulate_collect
@@ -1959,7 +1999,7 @@ def _to_mat_safe_obj(value: Any) -> Any:
 
 def _save_outputs_min(result: dict[str, Any], out_dir: str | Path, run_name: str) -> tuple[Path, Path]:
     """
-    Save Step2_min result to PKL and MATLAB files.
+    Save theta_G result to PKL and MATLAB files.
 
     Input:
     - result: result dictionary
@@ -2129,7 +2169,7 @@ def _save_outputs_min(result: dict[str, Any], out_dir: str | Path, run_name: str
 
 def run_step2_min(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     """
-        Run Step2_min end-to-end.
+        Run theta_G optimization end-to-end.
 
         Input:
         - cfg: dict[str, Any] | None
@@ -2163,7 +2203,7 @@ def run_step2_min(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     """
     if mode_text == "imported_nn":
         if cfg_local.get("n_branch", None) is None or cfg_local.get("m_fir", None) is None:  
-            # Fill imported-NN dimensions from the Step1 result when not provided in cfg.
+            # Fill imported-NN dimensions from the theta_N result when not provided in cfg.
             j_count_ref, m_fir_ref = _read_step1_dims(str(cfg_local["source_step1_pkl"]))
             cfg_local["n_branch"] = int(j_count_ref)
             cfg_local["m_fir"] = int(m_fir_ref)
@@ -2219,7 +2259,7 @@ def run_step2_min(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
 
     # Iterative refinement loop:
     # for iter_idx in range(0, n_refine_iter + 1):
-    #   1) solve_step2_cvx_min with current k_jtb
+    #   1) solve_step2_cvx_min with current k_jtb, i.e. solve the theta_G subproblem.
     #   2) _simulate_collect with current k_jtb and solved g_jm
     #   3) _compute_constraint_diagnostics
     #   4) append one iter_history item
@@ -2404,7 +2444,7 @@ def run_step2_min(cfg: dict[str, Any] | None = None) -> dict[str, Any]:
     result["feature_mean"] = np.asarray(inputs["feature_mean"], dtype=float)
     result["feature_std"] = np.asarray(inputs["feature_std"], dtype=float)
     result["x_max"] = inputs.get("x_max", cfg_local.get("x_max", None))
-    # Keep NN weights available in Step2 result for analytic/debug tests.
+    # Keep NN weights available in the theta_G result for analytic/debug tests.
     # Shape detail:
     # - model_state_dict is a torch state-dict mapping parameter names to tensors.
     # - For poly_lifting mode this stays None.

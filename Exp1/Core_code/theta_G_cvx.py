@@ -1,17 +1,25 @@
-from __future__ import annotations
 """
-Notation:
-    - T: number of time samples
-    - B: number of trajectories
-    - J: number of branches
-    - M: FIR length
-    - Ms: number of passivity frequency slices
+theta_G_cvx.py
 
-    Theory links:
-    - (E5) objective = train_SSE + l2reg * sum_j ||g_j||_2^2
-    - (E6) decay bounds: -rho0_j * rho_j^m <= g_j(m) <= rho0_j * rho_j^m
-    - (E7) passivity: V * g_j >= eps_j * 1, with V_qm = cos((q*pi/Ms)*m)
+CVXPY/MOSEK solver for the Exp1 theta_G subproblem.
+
+Role in the workflow:
+- theta_G is the FIR/filter-parameter update in Algorithm 1 of
+  arXiv:2508.05279v2.
+- This file builds and solves the convex least-squares problem for fixed
+  lifting values k_jtb, shape (J,T,B).
+- The objective is related to arXiv v2 Eq. (14)-Eq. (15).
+- The frequency-domain passivity and decay constraints are related to
+  arXiv v2 Eq. (16)-Eq. (17).
+
+Notation:
+- T: number of time samples
+- B: number of trajectories
+- J: number of branches
+- M: FIR length
+- Ms: number of passivity frequency slices
 """
+from __future__ import annotations
 from typing import Any
 
 import cvxpy as cp
@@ -141,7 +149,7 @@ def build_step2_problem(
 )   -> tuple[cp.Problem, cp.Variable, dict[str, Any]]:
     
     """
-        Build Step2 CVX problem from raw arrays.
+        Build the theta_G CVX problem from raw arrays.
 
         Input dimensions:
         - u_tb: (T,B)
@@ -300,7 +308,7 @@ def solve_step2_cvx_min(
     verbose_solver: bool,
 ) -> dict[str, Any]:
     """
-        Solve Step2 CVX problem using MOSEK only.
+        Solve the theta_G CVX problem using MOSEK only.
 
         Output dictionary keys:
         - g_jm: np.ndarray, shape (J,M)

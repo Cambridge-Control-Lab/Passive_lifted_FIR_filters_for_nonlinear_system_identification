@@ -1,9 +1,31 @@
 """
-Step1 neural lifting core for Exp2 NFIR training.
+theta_N neural-lifting training core for Exp2.
 
-This module trains the shared MLP lifting network while using a fixed FIR bank
-or an imported Step2 FIR bank. It keeps deterministic split and epoch-shuffle
-behavior so saved Exp2 results are reproducible.
+Position in the whole NFIR workflow:
+- This file implements the theta_N update in Algorithm 1 of
+  arXiv:2508.05279v2. In the paper, theta_N denotes the parameters of the
+  lifting functions used around the passive FIR bank.
+- Exp2 uses a parallel structure: a standalone linear FIR path plus NFIR
+  residual branches. The linear path is carried along with the imported
+  theta_G result, while this file trains the nonlinear lifting part.
+- Legacy variable names in this code may still contain ``step1`` or
+  ``step2_pkl``. In comments, ``step1`` means theta_N and ``step2`` means
+  theta_G; code identifiers are kept unchanged for compatibility.
+
+File-level flow map:
+1. Build delayed/scaled feature tensors x_btf, shape (B,T,F), from the
+   measured signals.
+2. Evaluate ``SharedMLP`` to produce lifting values k_btj, shape (B,T,J),
+   related to arXiv v2 Eq. (8) and Eq. (20).
+3. Combine k(t), u(t), the imported NFIR bank g_jm, shape (J,M), and the
+   standalone linear FIR g_linear_m, shape (M,), to compute predictions related
+   to arXiv v2 Eq. (9)-Eq. (10).
+4. Train theta_N with Adam/AdamW while keeping theta_G fixed, corresponding to
+   the theta_N update in Algorithm 1 / Eq. (19b).
+5. Optionally run closed-loop BPTT fine-tuning to reduce simulation error when
+   the model feeds back its own output.
+6. Save predictions, diagnostics, split metadata, and model state for the next
+   theta_G update.
 """
 
 from __future__ import annotations
@@ -44,7 +66,7 @@ def _apply_mlp_activation(x: torch.Tensor, name: str) -> torch.Tensor:
 
 class SharedMLP(nn.Module):
     """
-      Shared MLP lifting model used by NFIR Step1.
+      Shared MLP lifting model used by the NFIR theta_N update.
 
       SharedMLP(nn.Module)
       - means this class is inheriting nn.Module class
@@ -168,7 +190,7 @@ class SharedMLP(nn.Module):
 
 def build_default_config() -> dict[str,Any]:
     """
-      Build default config matching the Step1 training path.
+      Build default config matching the theta_N training path.
 
       Output:
       - cfg: dict with scalar fields only.
@@ -206,8 +228,8 @@ def build_default_config() -> dict[str,Any]:
                               # Smaller tau = faster decay; larger tau = slower decay.
     cfg["fir_gain_min"] = 0.6 # 
     cfg["fir_gain_max"] = 1.4 # Range of branch gains gain_j (initial amplitude scale).
-    cfg["fir_source_type"] = "exponential" # scalar string: FIR source type, "exponential" or "step2_pkl".
-    cfg["fir_source_step2_pkl"] = "" # path string to Step2 pkl when fir_source_type is "step2_pkl", else empty string.
+    cfg["fir_source_type"] = "exponential" # scalar string: FIR source type, "exponential" or legacy "step2_pkl" for theta_G output.
+    cfg["fir_source_step2_pkl"] = "" # path string to theta_G pkl when fir_source_type is "step2_pkl", else empty string.
     cfg["enable_parallel_fir"] = True # bool scalar: if False, standalone parallel FIR is forced to zero.
     cfg["zero_cost_first_n"] = 0  # scalar int, first N time samples ignored by NN/BPTT loss
     """
@@ -277,7 +299,7 @@ def build_default_config() -> dict[str,Any]:
     """BPTT paras
         bptt_finetune_enable:
         False keeps previous behavior.
-        True runs the closed-loop fine-tuning phase after normal Step1 training.
+        True runs the closed-loop fine-tuning phase after normal theta_N training.
 
         bptt_max_epochs:
         Number of fine-tuning epochs.
@@ -342,7 +364,7 @@ def build_default_config() -> dict[str,Any]:
 
 def _validate_config(cfg: dict[str, Any]) -> None:
     """
-    Validate key configuration entries for Step1 minimal path.
+    Validate key configuration entries for the theta_N path.
 
     Input:
     - cfg: config dict
@@ -502,7 +524,7 @@ def _validate_config(cfg: dict[str, Any]) -> None:
         fir_source_path_raw = cfg.get("fir_source_step2_pkl", "") # raw value expected as scalar string path.
         if not isinstance(fir_source_path_raw, str):
             raise ValueError("fir_source_step2_pkl must be a path string")
-        fir_source_path_text = fir_source_path_raw.strip() # scalar string: normalized Step2 pkl path text.
+        fir_source_path_text = fir_source_path_raw.strip() # scalar string: normalized theta_G pkl path text.
         if len(fir_source_path_text) == 0:
             raise ValueError("fir_source_step2_pkl must be set when fir_source_type='step2_pkl'")
 
@@ -601,10 +623,10 @@ def _validate_config(cfg: dict[str, Any]) -> None:
 
 def _load_parallel_fir_from_step2_pkl(step2_pkl_path: str) -> tuple[np.ndarray, np.ndarray]:
     """
-    Load NFIR bank and standalone linear FIR from Step2 pickle.
+    Load NFIR bank and standalone linear FIR from theta_G pickle.
 
     Input:
-    - step2_pkl_path: scalar string path
+    - step2_pkl_path: legacy scalar string path to theta_G output
 
     Output:
     - g_bank_jm: np.ndarray, shape (J,M)
@@ -636,20 +658,20 @@ def _load_parallel_fir_from_step2_pkl(step2_pkl_path: str) -> tuple[np.ndarray, 
 
 def _load_fir_bank_from_step2_pkl(step2_pkl_path: str) -> np.ndarray:
     """
-    Load FIR bank from Step2 pickle.
+    Load FIR bank from theta_G pickle.
 
     Input:
-    - step2_pkl_path: path string to Step2 pickle file
+    - step2_pkl_path: legacy path string to theta_G pickle file
 
     Output:
     - g_bank_jm: np.ndarray, shape (J,M)
     """
-    # step2_path_obj: Path scalar, normalized source file path.
+    # step2_path_obj: Path scalar, normalized theta_G source file path.
     step2_path_obj = Path(step2_pkl_path)
     if not step2_path_obj.exists():
         raise ValueError(f"Step2 pickle file does not exist: {step2_path_obj}")
 
-    # step2_dict: dict[str, Any], top-level object loaded from pickle.
+    # step2_dict: dict[str, Any], top-level theta_G object loaded from pickle.
     with step2_path_obj.open("rb") as file_obj:
         step2_dict = pickle.load(file_obj)
     if not isinstance(step2_dict, dict):
@@ -716,6 +738,19 @@ def _resolve_runtime_device(cfg_device: str) -> torch.device:
 
     # Defensive fallback (should already be prevented by _validate_config).
     raise ValueError("device must be one of: cpu, mps, cuda")
+
+
+def _sync_device_for_timing(device: torch.device) -> None:
+    """
+    Synchronize asynchronous device queues before reading wall-clock time.
+
+    Input:
+    - device: torch.device scalar, runtime backend for tensors/model.
+    """
+    if device.type == "mps":
+        torch.mps.synchronize()
+    elif device.type == "cuda":
+        torch.cuda.synchronize(device)
 
 
 def _device_report(device: torch.device) -> dict[str, Any]:
@@ -1347,7 +1382,7 @@ def _infer_all_closed_loop(
     g_linear_m: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-        Run closed-loop causal simulation for Step1 model.
+        Run closed-loop causal simulation for the theta_N model.
 
         Input:
         - u_tb: np.ndarray, shape (T,B)
@@ -1549,7 +1584,7 @@ def train_step1(u_tb: np.ndarray, y_tb: np.ndarray, p_7tb: np.ndarray,
                 cfg: dict[str, Any],
                 initial_model_state_dict: dict[str,Any] | None = None) -> dict[str, Any]:
     """
-      Train Step1 minimal NFIR model.
+      Train the theta_N minimal NFIR model.
 
       Abbreivations:
       - T means num of samples per batch, 
@@ -1565,7 +1600,7 @@ def train_step1(u_tb: np.ndarray, y_tb: np.ndarray, p_7tb: np.ndarray,
       - cfg: configuration dict
       - initial_model_state_dict: Optional NN parameter dict.
                                   Same structure as result["model_state_dict"] 
-                                  from a previous Step1 run.
+                                  from a previous theta_N run.
 
       Main internal tensor dimensions:
       - p_ext_ftb: (F,T,B)
@@ -1674,16 +1709,16 @@ def train_step1(u_tb: np.ndarray, y_tb: np.ndarray, p_7tb: np.ndarray,
         x_max = float(cfg["x_max"])  # scalar clip bound for normalized feature vector x
         x_all_btf = np.clip(x_all_btf, -x_max, x_max)
 
-    # fir_source_type_text: scalar string, FIR source type ("exponential" or "step2_pkl").
+    # fir_source_type_text: scalar string, FIR source type ("exponential" or legacy "step2_pkl").
     fir_source_type_text = str(cfg["fir_source_type"]).strip().lower()
     # fir_source_path_used: scalar string path used for FIR import, else None.
     fir_source_path_used: str | None = None
 
     # Build FIR filter coefficients by selected source type.
 
-    # j_count_expected: scalar int, expected number of branches J from Step1 cfg.
+    # j_count_expected: scalar int, expected number of branches J from theta_N cfg.
     j_count_expected = int(cfg["n_branch"])
-    # m_fir_expected: scalar int, expected FIR length M from Step1 cfg.
+    # m_fir_expected: scalar int, expected FIR length M from theta_N cfg.
     m_fir_expected = int(cfg["m_fir"])
     # g_bank_expected_shape_jm: tuple(int,int), expected FIR matrix shape (J,M).
     g_bank_expected_shape_jm = (j_count_expected, m_fir_expected)
@@ -1697,9 +1732,9 @@ def train_step1(u_tb: np.ndarray, y_tb: np.ndarray, p_7tb: np.ndarray,
         )
 
     # g_bank_jm = g_bank_loaded_jm
-    # taus_j: np.ndarray, shape (J,), stand-in for imported FIR (tau not provided by Step2 here).
+    # taus_j: np.ndarray, shape (J,), stand-in for imported FIR (tau not provided by theta_G here).
     taus_j = np.full((j_count_expected,), np.nan, dtype=float)
-    # gains_j: np.ndarray, shape (J,), stand-in for imported FIR (gain not provided by Step2 here).
+    # gains_j: np.ndarray, shape (J,), stand-in for imported FIR (gain not provided by theta_G here).
     gains_j = np.full((j_count_expected,), np.nan, dtype=float)
     fir_source_path_used = step2_pkl_path_text
 
@@ -1758,9 +1793,6 @@ def train_step1(u_tb: np.ndarray, y_tb: np.ndarray, p_7tb: np.ndarray,
 
     nn_open_loop_train_time_sec = 0.0  # scalar seconds
     nn_bptt_train_time_sec = 0.0       # scalar seconds
-    device_name = str(cfg["device"]).strip().lower()
-    if device_name != "mps":
-        raise ValueError("timing not supported for not mps mode")
     
     if not skip_open_loop_training:
         # Use verbose option to decide whether to print out
@@ -1779,7 +1811,7 @@ def train_step1(u_tb: np.ndarray, y_tb: np.ndarray, p_7tb: np.ndarray,
                 f"[min-Step1] fir_source={fir_source_type_text} | epochs={cfg['max_epochs']}"
             )
         
-        torch.mps.synchronize() # sync gpu and cpu
+        _sync_device_for_timing(device)
         timer1 = time.time()
         # Training loop: loop over epochs
         for epoch in range(1, int(cfg["max_epochs"]) + 1):
@@ -1887,7 +1919,7 @@ def train_step1(u_tb: np.ndarray, y_tb: np.ndarray, p_7tb: np.ndarray,
                         )
                     break # terminate the for loop for epoch baall. so we exit epoch training
         
-        torch.mps.synchronize() # sync gpu and cpu
+        _sync_device_for_timing(device)
         nn_open_loop_train_time_sec = time.time() - timer1
         print('In step1 open loop training. Time to train = ', nn_open_loop_train_time_sec)
     else:
@@ -1900,7 +1932,7 @@ def train_step1(u_tb: np.ndarray, y_tb: np.ndarray, p_7tb: np.ndarray,
     model.load_state_dict(best_state)
     """ BPTT block starts here 
     """
-    torch.mps.synchronize() # sync gpu and cpu
+    _sync_device_for_timing(device)
     timer2 = time.time()
 
     bptt_history_epoch = []
@@ -2249,7 +2281,7 @@ def train_step1(u_tb: np.ndarray, y_tb: np.ndarray, p_7tb: np.ndarray,
 
     """ BPTT block ends here 
     """
-    torch.mps.synchronize() # sync gpu and cpu
+    _sync_device_for_timing(device)
     nn_bptt_train_time_sec = time.time() - timer2
     print('In step1 BPTT loop training. Time to BPT = ', nn_bptt_train_time_sec)
 

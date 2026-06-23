@@ -1,3 +1,20 @@
+"""Feature-map and FIR-initialization helpers for Exp1.
+
+Role in the workflow:
+- The theta_N update needs an extended feature tensor x_btf, shape (B,T,F),
+  before the MLP can produce lifting values k_btj, shape (B,T,J).
+- The delayed-feature construction here supports the lifting functions related
+  to arXiv:2508.05279v2 Eq. (8) and Eq. (20).
+- The fixed exponential FIR-bank helper gives deterministic initial FIR taps
+  g_jm, shape (J,M), when a run does not import them from a theta_G result.
+
+Notation:
+- T: number of time samples
+- B: number of trajectories
+- F: number of extended features
+- J: number of NFIR branches
+- M: FIR length
+"""
 from __future__ import annotations
 
 import numpy as np

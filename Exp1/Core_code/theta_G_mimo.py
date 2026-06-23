@@ -1,3 +1,19 @@
+"""MIMO/FIR forward helpers for Exp1 theta_G and theta_N code.
+
+Role in the workflow:
+- These routines implement the causal FIR bookkeeping used by the NFIR
+  operator in arXiv:2508.05279v2 Eq. (7)-Eq. (10).
+- ``build_fir_regression_matrix`` constructs the Toeplitz-style causal FIR
+  design matrix Phi_tm, shape (T,M), used by the convex theta_G solver.
+- ``nfir_forward_diagonal_mimo`` evaluates branch inputs, FIR branch outputs,
+  and their sum for diagnostics and rollouts.
+
+Notation:
+- T: number of time samples
+- B: number of trajectories
+- J: number of branches/channels
+- M: FIR length
+"""
 from __future__ import annotations
 
 
@@ -134,7 +150,7 @@ def nfir_forward_diagonal_mimo(
     g_jm: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-    Run full Step2 NFIR forward pass with diagonal FIR bank through MIMO interface.
+    Run full theta_G/theta_N NFIR forward pass with a diagonal FIR bank.
 
     Input:
     - k_jtb: np.ndarray, shape (J,T,B), dtype float64

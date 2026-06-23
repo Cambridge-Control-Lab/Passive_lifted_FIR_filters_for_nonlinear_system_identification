@@ -1,23 +1,29 @@
+"""
+Exp2 NFIR alternating-training orchestration script.
+
+Role in the workflow:
+- This script runs the Exp2 outer loop for Algorithm 1 of
+  arXiv:2508.05279v2.
+- Each outer iteration first runs theta_G, the FIR/filter-parameter
+  optimization step, and then theta_N, the neural-lifting training step.
+- Legacy code variable names still contain ``step2`` for theta_G and
+  ``step1`` for theta_N. Those identifiers are intentionally not renamed,
+  because run names, saved files, and downstream scripts depend on them.
+
+Data/result handoff:
+- theta_G writes a ``*.pkl`` and ``*_train.mat`` result containing the solved
+  standalone linear FIR g_linear_m, shape (M,), and NFIR branch bank g_jm,
+  shape (J,M).
+- theta_N imports the latest theta_G ``*.pkl`` result, trains the lifting MLP,
+  and saves model state plus predictions for the next theta_G iteration.
+
+Execution policy:
+- each theta_G/theta_N stage runs exactly once per outer iteration
+- no timeout-kill logic
+- no profile ladder / no auto-shrink retry
+- fail fast on first stage error
+"""
 from __future__ import annotations
-"""
-    run_outer_iter.py
-
-    Automate outer double-iteration:
-    Step2 with poly -> Step 1 -> Step 2 with imported nn -> Step1 ->  Step 2 with imported nn...
-
-    So:
-    ite0: Step2 with poly -> Step 1
-    ite1: Step 2 with imported nn -> Step1
-    ite2: Step 2 with imported nn -> Step1
-    ite3: Step 2 with imported nn -> Step1
-    ite4: Step 2 with imported nn -> Step1
-
-    Execution policy:
-    - each stage runs exactly once per outer iteration
-    - no timeout-kill logic
-    - no profile ladder / no auto-shrink retry
-    - fail fast on first stage error
-"""
 import argparse
 import json
 from pathlib import Path
@@ -128,7 +134,7 @@ step1_run_name_arr = [f"{case_tag}_s{10 + iter_idx}" for iter_idx in range(max_i
 step1_run_name_pkl_arr = [f"{sname}.pkl" for sname in step1_run_name_arr]
 
 # if len(step1_run_name_arr) != max_iteration or len(step2_run_name_arr) != max_iteration or len(mode_step2_arr) != max_iteration:
-#     raise ValueError("step1 and 2 run_name_arr size wrong")
+#     raise ValueError("legacy theta_N/theta_G run_name_arr size wrong")
 
 
 for iter_idx in range(0,max_iteration):
@@ -154,12 +160,12 @@ for iter_idx in range(0,max_iteration):
     cfg_step2["n_refine_iter"] = 0
     cfg_step2["iter_yhat_add_noise"] = False 
     cfg_step2["train_val_test_split"] = (1, 1, 2) 
-    cfg_step2["imported_split_source"] = "cfg"   # "step1": use Step1 saved split; "cfg": use Step2 train_val_test_split.
+    cfg_step2["imported_split_source"] = "cfg"   # "step1": use theta_N saved split; "cfg": use theta_G train_val_test_split.
     
     if mode == "poly_lifting":
         cfg_step2["x_max"] = 1.0
     else:
-        cfg_step2["x_max"] = None  # imported_nn must match Step1 x_max.
+        cfg_step2["x_max"] = None  # imported_nn must match theta_N x_max.
 
 
     cfg_step2["feature_norm_mode"] = feature_norm_mode  # 'none' or 'zscore'
@@ -279,7 +285,7 @@ for iter_idx in range(0,max_iteration):
 
     # source_step1_pkl = out_dir / step1_run_name_pkl_arr[iter_idx - 1]
     # if not source_step1_pkl.is_file():
-    #     raise FileNotFoundError(f"Missing source Step1 pkl: {source_step1_pkl}")
+    #     raise FileNotFoundError(f"Missing source theta_N pkl: {source_step1_pkl}")
     if iter_idx > 0:
         if NN_para_inher_double_iter == False:
             initial_model_state_dict = None

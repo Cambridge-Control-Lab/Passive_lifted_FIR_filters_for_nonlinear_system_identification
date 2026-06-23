@@ -1,21 +1,23 @@
+"""
+theta_G_parallel_fir_mimo.py
+
+MIMO/FIR forward helpers for Exp2 theta_G and theta_N code.
+
+Role in the workflow:
+- These routines implement the causal FIR bookkeeping used by the NFIR
+  operator in arXiv:2508.05279v2 Eq. (7)-Eq. (10).
+- Exp2 adds ``linear_fir_forward`` for the standalone linear FIR path used in
+  the industrial-robot experiment.
+- ``nfir_forward_diagonal_mimo`` evaluates branch inputs, FIR branch outputs,
+  and their sum for diagnostics and rollouts.
+
+Notation used everywhere in this file:
+- T: number of time samples per trajectory
+- B: number of trajectories
+- J: number of branches/channels
+- M: FIR length
+"""
 from __future__ import annotations
-"""
-    step2_min_mimo.py
-
-    Minimal MIMO helper functions for Step2_min.
-
-    Notation used everywhere in this file:
-    - T: number of time samples per trajectory
-    - B: number of trajectories
-    - J: number of branches/channels
-    - M: FIR length
-
-    Theory links:
-    - (E1) s_j,b(t) = k_j,b(t) * u_b(t)
-    - (E2) v_o,b(t) = sum_i sum_m g_o,i(m) * s_i,b(t-m)
-    - (E3) yhat_j,b(t) = k_j,b(t) * v_j,b(t)
-    - (E4) yhat_b(t) = sum_j yhat_j,b(t)
-"""
 
 import numpy as np
 import time
@@ -182,7 +184,7 @@ def nfir_forward_diagonal_mimo(
     g_jm: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
-    Run full Step2 NFIR forward pass with diagonal FIR bank through MIMO interface.
+    Run full theta_G/theta_N NFIR forward pass with a diagonal FIR bank.
 
     Input:
     - k_jtb: np.ndarray, shape (J,T,B), dtype float64

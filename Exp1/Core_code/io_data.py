@@ -1,3 +1,18 @@
+"""MATLAB/Python data I/O helpers for Exp1 NFIR runs.
+
+Role in the workflow:
+- Load MATLAB training data into the common tensor convention used by theta_G
+  and theta_N: u_tb and y_tb have shape (T,B), and p_7tb has shape (7,T,B).
+- Rebuild scheduling channels from input/output data when closed-loop rollout
+  needs model-generated outputs.
+- Save theta_N outputs to both pickle and MATLAB ``*_train.mat`` files so
+  later theta_G/theta_N runs and MATLAB analysis scripts can consume the same
+  results.
+
+Open-source compatibility note:
+- Field names in saved MATLAB structs are intentionally preserved. Comments may
+  call these theta_N outputs, but runtime field names are not changed.
+"""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -76,7 +91,7 @@ def load_training_mat(mat_path: str | Path) -> dict:
     opt_train_mat = dta["opt_train_mat"][0, 0]
     p_train_delay_mat = dta["p_train_delay_mat"][0, 0]
 
-    # Slice and cast to get the exact arrays used by old Step1 path.
+    # Slice and cast to get the exact arrays used by the legacy theta_N path.
     # u_tb has shape (T, B).
     u_tb = np.asarray(ipt_train_mat[0, 0:n_time, 0:n_batch], dtype=float)
     # y_tb has shape (T, B).
@@ -216,7 +231,7 @@ def build_p7_from_u_y(
 
 def save_step1_outputs(result: dict, out_dir: str | Path, run_name: str) -> tuple[Path, Path]:
     """
-    Save Step1 result to both pickle and MATLAB formats.
+    Save theta_N result to both pickle and MATLAB formats.
 
     Input:
     - result: dict
@@ -240,7 +255,7 @@ def save_step1_outputs(result: dict, out_dir: str | Path, run_name: str) -> tupl
 
     Notes:
     - MATLAB file contains one top-level struct named "{run_name}_train".
-    - Field names follow old Step1 export naming for compatibility.
+    - Field names follow old theta_N export naming for compatibility.
     """
 
     save_full_diagnostics = bool(result["cfg"].get("save_full_diagnostics", True))

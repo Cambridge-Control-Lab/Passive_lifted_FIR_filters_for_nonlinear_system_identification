@@ -1,8 +1,18 @@
-from __future__ import annotations
 """
 theta_G_parallel_fir_cvx.py
 
-Minimal CVXPY + MOSEK solver for Step2_min.
+CVXPY/MOSEK solver for the Exp2 theta_G subproblem.
+
+Role in the workflow:
+- theta_G is the FIR/filter-parameter update in Algorithm 1 of
+  arXiv:2508.05279v2.
+- This file builds and solves the convex least-squares problem for fixed
+  lifting values k_jtb, shape (J,T,B).
+- Exp2 additionally includes a standalone linear FIR path, g_linear_m with
+  shape (M,), alongside the NFIR branch bank g_jm with shape (J,M).
+- The objective is related to arXiv v2 Eq. (14)-Eq. (15).
+- The frequency-domain passivity and decay constraints are related to
+  arXiv v2 Eq. (16)-Eq. (17).
 
 Notation:
     - T: number of time samples
@@ -10,12 +20,8 @@ Notation:
     - J: number of branches
     - M: FIR length
     - Ms: number of passivity frequency slices
-
-    Theory links:
-    - (E5) objective = train_SSE + l2reg * sum_j ||g_j||_2^2
-    - (E6) decay bounds: -rho0_j * rho_j^m <= g_j(m) <= rho0_j * rho_j^m
-    - (E7) passivity: V * g_j >= eps_j * 1, with V_qm = cos((q*pi/Ms)*m)
 """
+from __future__ import annotations
 from typing import Any
 
 import cvxpy as cp
@@ -147,7 +153,7 @@ def build_step2_problem(
 )   -> tuple[cp.Problem, cp.Variable, cp.Variable | None, dict[str, Any]]:
     
     """
-        Build Step2 CVX problem from raw arrays.
+        Build the theta_G CVX problem from raw arrays.
 
         Input dimensions:
         - u_tb: (T,B)
@@ -176,6 +182,11 @@ def build_step2_problem(
         eps_j=eps_j,
         ms_passivity=int(ms_passivity),
     )
+    # The Exp2 robot-arm batches have different non-zero initial conditions.
+    # The early part of each trajectory is strongly affected by those initial
+    # conditions, so theta_G can ignore the first N samples in the loss. The
+    # Table II scripts use the same transient-window convention when reporting
+    # model-fit metrics.
     n_free = int(zero_cost_first_n)  # scalar int, first N time samples ignored by loss
     if n_free < 0 or n_free >= t_count:
         raise ValueError("zero_cost_first_n must satisfy 0 <= N < T")
@@ -342,7 +353,7 @@ def solve_step2_cvx_min(
     zero_cost_first_n: int = 0,
 ) -> dict[str, Any]:
     """
-        Solve Step2 CVX problem using MOSEK only.
+        Solve the theta_G CVX problem using MOSEK only.
 
         Output dictionary keys:
         - g_jm: np.ndarray, shape (J,M)
