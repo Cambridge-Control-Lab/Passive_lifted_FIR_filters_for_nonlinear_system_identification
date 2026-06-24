@@ -51,19 +51,7 @@ instructions for your installation before running the optimization scripts.
 ## Reproducing experiments
 
 First create and activate the conda environment from the Getting started
-section. Then run the experiment drivers from the repository root:
-
-```bash
-python Exp1/train_FB_BP_noisy_Fig4.py
-python Exp2/train_NFIR_Table_II.py
-```
-
-Saved result files used for the paper comparisons are included in the
-experiment `Results/` folders where available. Exp1 provides a Python plotting
-script for the FB-BP noisy result; Exp2 provides a MATLAB analysis script for
-Table II.
-
-For detailed instructions, see:
+section. Then follow the  detailed instructions in 
 
 - [Exp1/README.md](Exp1/README.md)
 - [Exp2/README.md](Exp2/README.md)
