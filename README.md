@@ -83,8 +83,9 @@ The Python experiments were tested with the following package versions:
 settings: `mps`, `cpu`, and `cuda`. The provided Exp1 FB-BP results were
 generated with `mps`.
 
-MATLAB2025B or newer is required for the Exp2 Table II analysis script and
-for the MATLAB baseline models.
+MATLAB2025B or newer is required for (1) generating the training data in the folders Exp1 and Exp2; (2) training N4SID state-space model in Exp1 and Grey-box model in Exp2. 
+
+Julia is required to run REN neural network in the folder Exp1. See [Exp1/Other_models_in_Exp1/Exp1_REN/README.md](Exp1/Other_models_in_Exp1/Exp1_REN/README.md) for details. 
 
 ## Citation
 
